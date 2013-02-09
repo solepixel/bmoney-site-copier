@@ -1,0 +1,76 @@
+.block-form label,
+.block-form div.label {
+	display:block;
+	clear:both;
+	padding:8px 0 0;
+}
+.block-form label span,
+.block-form div.label span {
+	display:block;
+	float:left;
+}
+.block-form label span span,
+.block-form div.label span span,
+.block-form div.label label {
+	float:none;
+}
+.block-form div.label .field.inline label {
+	display:inline-block;
+	padding-right:10px;
+}
+.block-form label .label,
+.block-form div.label .label {
+	padding-top:5px;
+	width:180px;
+}
+.block-form label .description,
+.block-form div.label .description {
+	padding:5px 0 0 10px;
+}
+.block-form label .before,
+.block-form div.label .before {
+	padding-top:5px;
+	color:#666;
+}
+
+
+.block-form label .field input.text,
+.block-form label .field input[type="text"],
+.block-form label .field input[type="password"] {
+	width:220px;
+}
+.block-form label .field textarea {
+	width:400px;
+}
+
+
+.block-form label.ftp-port .field input {
+	width:50px;
+}
+.block-form label.ftp-path .field input {
+	width:400px;
+}
+
+
+
+.block-form fieldset,
+.block-form h3,
+.block-form .buttons,
+.block-form hr {
+	clear:both;
+}
+
+.block-form fieldset {
+	border:0;
+	margin:0;
+	padding-bottom:20px;
+}
+.block-form hr {
+	border:0;
+	border-bottom:1px solid #CCC;
+	width:60%;
+	text-align:left;
+	padding-bottom:20px;
+	margin:0 0 20px;
+	height:1px;
+}
