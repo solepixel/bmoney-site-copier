@@ -17,6 +17,8 @@ class BM_Site_Copier {
 	var $wd;
 	var $ftp_root;
 	
+	var $fails = array();
+	
 	/**
 	 * BM_Site_Copier::__construct()
 	 * 
@@ -50,6 +52,9 @@ class BM_Site_Copier {
 	 * @return void
 	 */
 	function initialize(){
+		ini_set('memory_limit', '-1');
+		set_time_limit(600); // 10 minutes
+		
 		add_action( 'init', array($this, '_init'));
 	}
 	
@@ -81,6 +86,9 @@ class BM_Site_Copier {
 			wp_register_style(BMSC_OPT_PREFIX.'admin', BMSC_DIR.'css/admin.css', array(), BMSC_VERSION);
 			add_action('admin_menu', array($this, '_admin_menu'));
 			
+			add_action('bmsc_copy_site', array($this, 'copy_database'));
+			add_action('bmsc_copy_site', array($this, 'change_urls'));
+			add_action('bmsc_copy_site', array($this, 'ftp_files'));
 		}
 		
 	}
@@ -144,7 +152,16 @@ class BM_Site_Copier {
 	 * @return void
 	 */
 	function _site_copied(){
-		 echo '<div class="updated"><p>Your site has been copied.</p></div>';
+		 if(count($this->fails)){
+		 	echo '<div class="error"><p>There were errors when copying this site:</p>
+			 <ul>';
+			 foreach($this->fails as $file){
+			 	echo '<li>'.$file.'</li>';
+			 }
+			 echo '</ul></div>';
+		 } else {
+		 	echo '<div class="updated"><p>Your site has been copied. <a href="'.$this->vars['new_url'].'" target="_blank">Visit New Site</a> | <a href="'.$this->vars['new_url'].'/wp-login.php" target="_blank">Login to Admin</a></p></div>';
+		 }
 	}
 	
 	/**
@@ -157,7 +174,7 @@ class BM_Site_Copier {
 	}
 	
 	/**
-	 * BM_Site_Copier::_settings_page()
+	 * BM_Site_Copier::_admin_page()
 	 * 
 	 * @return void
 	 */
@@ -175,6 +192,11 @@ class BM_Site_Copier {
 	}
 	
 	
+	/**
+	 * BM_Site_Copier::settings()
+	 * 
+	 * @return
+	 */
 	function settings(){
 		if(isset($_POST) && count($_POST) > 0){
 			foreach($_POST as $k => $v){
@@ -200,6 +222,12 @@ class BM_Site_Copier {
 		return array();
 	}
 	
+	/**
+	 * BM_Site_Copier::encrypt_pass()
+	 * 
+	 * @param mixed $pass
+	 * @return
+	 */
 	function encrypt_pass($pass){
 		if(function_exists('mcrypt_encrypt')){
 			$encrypted = base64_encode(mcrypt_encrypt(MCRYPT_RIJNDAEL_256, md5(SECURE_AUTH_SALT), $pass, MCRYPT_MODE_CBC, md5(md5(SECURE_AUTH_SALT))));
@@ -208,6 +236,11 @@ class BM_Site_Copier {
 		return $pass;
 	}
 	
+	/**
+	 * BM_Site_Copier::decrypt_passwords()
+	 * 
+	 * @return void
+	 */
 	function decrypt_passwords(){
 		foreach($this->settings as $k => $v){
 			if($k == 'db_pass' || $k == 'ftp_pass'){
@@ -216,6 +249,12 @@ class BM_Site_Copier {
 		}
 	}
 	
+	/**
+	 * BM_Site_Copier::decrypt_pass()
+	 * 
+	 * @param mixed $pass
+	 * @return
+	 */
 	function decrypt_pass($pass=NULL){
 		if($pass && function_exists('mcrypt_encrypt')){
 			$decrypted = rtrim(mcrypt_decrypt(MCRYPT_RIJNDAEL_256, md5(SECURE_AUTH_SALT), base64_decode($pass), MCRYPT_MODE_CBC, md5(md5(SECURE_AUTH_SALT))), "\0");
@@ -225,6 +264,11 @@ class BM_Site_Copier {
 		return $pass;
 	}
 	
+	/**
+	 * BM_Site_Copier::copier()
+	 * 
+	 * @return
+	 */
 	function copier(){
 		if(isset($_POST) && count($_POST) > 0){
 			foreach($_POST as $k => $v){
@@ -238,9 +282,7 @@ class BM_Site_Copier {
 				}
 			}
 			
-			$this->copy_database();
-			$this->change_urls();
-			$this->ftp_files();
+			do_action('bmsc_copy_site', $this);
 			
 			add_action('admin_notices', array($this, '_site_copied'));
 			
@@ -249,6 +291,11 @@ class BM_Site_Copier {
 		return array();
 	}
 	
+	/**
+	 * BM_Site_Copier::ftp_files()
+	 * 
+	 * @return void
+	 */
 	function ftp_files(){
 		$conn = ftp_connect($this->vars['ftp_host']);
 		$login = ftp_login($conn, $this->vars['ftp_user'], $this->vars['ftp_pass']);
@@ -258,39 +305,73 @@ class BM_Site_Copier {
 			$this->error = 'FTP Connection failed.';
 			add_action('admin_notices', array($this, '_display_error'));
 		} else {
-			$chdir = ftp_chdir($conn, $this->vars['ftp_path']);
+			ftp_chdir($conn, $this->vars['ftp_path']);
+			$this->wd = '';
 			$source = $_SERVER['DOCUMENT_ROOT'].trailingslashit($this->vars['directory']);
-			$this->recursive_ftp_copy($conn, $source, true);
+			
+			if($this->debug) echo '<div style="overflow:auto;height:500px; margin:25px 25px 25px 0;">';
+			
+				if($this->debug) echo '<div><strong>Opening Folder</strong> '.$source.'</div>';
+				chdir($source);
+				$this->copy_root = $source;
+				$this->recursive_ftp_copy($conn, $source);
+			
+			if($this->debug) echo '</div>';
 		}
 		ftp_close($conn);
 	}
 	
 	
-	function recursive_ftp_copy($conn, $src, $base=false){
-		if($base) $this->copy_root = $src;
-		
-		chdir($src);
+	/**
+	 * BM_Site_Copier::recursive_ftp_copy()
+	 * 
+	 * @param mixed $conn
+	 * @param mixed $src
+	 * @return void
+	 */
+	function recursive_ftp_copy($conn, $src){
 		if ($handle = opendir($src)){
 			while (false !== ($file = readdir($handle))){
 				if ($file != '.' && $file != '..')   {
-					// check if it's a file or directory
+					if($this->is_excluded($file, $this->wd)){
+						if($this->debug) echo '<div><strong>SKIPPED!</strong></div>';
+						continue;
+					}
+					
 					if (!is_dir($file)){
-						if(!$this->is_excluded($file, 'file', $this->wd)){
-							$copy = $this->modifications($file);
-							ftp_put($conn, basename($file), $copy, FTP_BINARY);
-							if($copy != $file){
-								unlink($this->copy_root.$copy);
-							}
+						if($this->debug) echo '<div><strong>Copying</strong> '.$this->wd.$file.' to '.$this->vars['ftp_path'].'/'.$this->wd.'</div>';
+						
+						$copy = $this->modifications($file);
+						$result = ftp_put($conn, basename($file), $copy, FTP_BINARY);
+						if(!$result){
+							$this->fails[] = $file;
+							if($this->debug) echo ' &nbsp; <span style="color:#C00;">FAIL</span>';
+						} else {
+							if($this->debug) echo ' &nbsp; <span style="color:#33FF00;">Copied!</span>';
+						}
+						if($copy != $file){
+							unlink($this->copy_root.$copy);
 						}
 					} else {
-						#if(!$this->is_excluded($file, 'dir', $this->wd)){ // this isn't working for some reason....
-							$this->ftp_change_dir($conn, $file);
-							$this->wd .= trailingslashit($file);
-							$this->recursive_ftp_copy($conn, $this->copy_root.$this->wd);
-							$this->wd = $this->str_lreplace($file.'/', '', $this->wd);
-							ftp_chdir($conn, '../');
-							chdir('../');
-						#}
+						if($this->debug) echo '<div><strong>Changing working directory to '.$this->copy_root.$this->wd.$file.'</strong></div>';
+						if($this->debug) echo '<div><strong>Changing remote working directory to '.$this->vars['ftp_path'].'/'.$this->wd.$file.'</strong></div>';
+						
+						$prev = $this->wd;
+						$this->wd .= $file.'/';
+						chdir($this->copy_root.$this->wd);
+						$this->ftp_change_dir($conn, $file);
+						
+						if($this->debug) echo '<div><strong>Current working directory: '.getcwd().'</strong></div>';
+						if($this->debug) echo '<div><strong>Current remote working directory: '.ftp_pwd($conn).'</strong></div>';
+						
+						$this->recursive_ftp_copy($conn, $this->copy_root.$this->wd);
+						ftp_chdir($conn, '../');
+						chdir('../');
+						$this->wd = $prev;
+						
+						if($this->debug) echo '<div><strong>Current working directory: '.getcwd().'</strong></div>';
+						if($this->debug) echo '<div><strong>Current remote working directory: '.ftp_pwd($conn).'</strong></div>';
+						if($this->debug) echo '<div><strong>Restoring working directory to '.$this->wd.'</strong></div>';
 					}
 				}
 			}
@@ -298,6 +379,13 @@ class BM_Site_Copier {
 		}   
 	}
 	
+	/**
+	 * BM_Site_Copier::ftp_change_dir()
+	 * 
+	 * @param mixed $conn
+	 * @param mixed $dir
+	 * @return
+	 */
 	function ftp_change_dir($conn, $dir){
 		$pushd = ftp_pwd($conn);
 		
@@ -306,36 +394,52 @@ class BM_Site_Copier {
 			return true;
 		}
 		
+		if($this->debug) echo '<div><strong>Creating ftp directory: '.$dir.'</strong></div>';
 		ftp_mkdir($conn, $dir);
 		ftp_chdir($conn, $dir);
 		
 		return true;
-	} 
-	
-	function str_lreplace($search, $replace, $subject){
-	    $pos = strrpos($subject, $search);
-	
-	    if($pos !== false){
-	        $subject = substr_replace($subject, $replace, $pos, strlen($search));
-	    }
-	
-	    return $subject;
 	}
 	
-	function is_excluded($name, $type='file', $working_dir=''){
+	/**
+	 * BM_Site_Copier::is_excluded()
+	 * 
+	 * @param mixed $name
+	 * @param string $working_dir
+	 * @return
+	 */
+	function is_excluded($name, $working_dir=''){
+		$excluded = false;
 		foreach($this->settings['excludes'] as $exclude){
-			if($name == $exclude) return true;
 			
-			if($type == 'dir'){
-				if(rtrim($working_dir.$name, '/') == rtrim($exclude, '/')) return true;
-			} elseif($type == 'file'){
-				if($working_dir.$name == $exclude) return true;
+			if($name == $exclude) $excluded = true;
+			if($excluded){
+				if($this->debug) echo '<div style="color:#666;">EC1: '.$name. ' | '.$exclude.'</div>';
+				return $excluded;
+			}
+			
+			if(rtrim($working_dir.$name, '/') == rtrim($exclude, '/')) $excluded = true;
+			if($excluded){
+				if($this->debug) echo '<div style="color:#666;">EC2: '.rtrim($working_dir.$name, '/'). ' | '.rtrim($exclude, '/').'</div>';
+				return $excluded;
+			}
+			
+			if($working_dir.$name == $exclude) $excluded = true;
+			if($excluded){
+				if($this->debug) echo '<div style="color:#666;">EC3: '.$working_dir.$name. ' | '.$exclude.'</div>';
+				return $excluded;
 			}
 		}
 		
-		return false;
+		return $excluded;
 	}
 	
+	/**
+	 * BM_Site_Copier::modifications()
+	 * 
+	 * @param mixed $file
+	 * @return
+	 */
 	function modifications($file){
 		if($file == 'wp-config.php'){
 			$copy = 'wp-config-bmcopy.php';
@@ -385,6 +489,12 @@ class BM_Site_Copier {
 		return $file;
 	}
 	
+	/**
+	 * BM_Site_Copier::generate_key()
+	 * 
+	 * @param integer $length
+	 * @return
+	 */
 	function generate_key($length=64) {
 		$random = '';
 		for ($i = 0; $i < $length; $i++) {
@@ -399,7 +509,11 @@ class BM_Site_Copier {
 	}
 	
 	
-	
+	/**
+	 * BM_Site_Copier::copy_database()
+	 * 
+	 * @return
+	 */
 	function copy_database(){
 		$sql_file = $_SERVER['DOCUMENT_ROOT'].'/bm-db-backup.sql';
 		exec('mysqldump --user='.DB_USER.' --password='.DB_PASSWORD.' --host='.DB_HOST.' '.DB_NAME.' > '.$sql_file);
@@ -416,6 +530,11 @@ class BM_Site_Copier {
 	}
 	
 	
+	/**
+	 * BM_Site_Copier::change_urls()
+	 * 
+	 * @return void
+	 */
 	function change_urls(){
 		$params = array(
 			'search_for' => $this->vars['site_url'],
