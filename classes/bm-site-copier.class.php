@@ -64,6 +64,10 @@ class BM_Site_Copier {
 	 * @return void
 	 */
 	function _init(){
+		
+		add_action('wp_ajax_nopriv_bmsc_test_connections', array($this, 'test_connections') );
+		add_action('wp_ajax_bmsc_test_connections', array($this, 'test_connections') );
+			
 		if(is_admin()){
 			
 			if(class_exists('WP_GitHub_Updater')){
@@ -84,6 +88,7 @@ class BM_Site_Copier {
 			}
 			
 			wp_register_style(BMSC_OPT_PREFIX.'admin', BMSC_DIR.'css/admin.css', array(), BMSC_VERSION);
+			wp_register_script(BMSC_OPT_PREFIX.'admin', BMSC_DIR.'js/admin.js', array('jquery'), BMSC_VERSION);
 			add_action('admin_menu', array($this, '_admin_menu'));
 			
 			add_action('bmsc_copy_site', array($this, 'copy_database'));
@@ -180,7 +185,7 @@ class BM_Site_Copier {
 	 */
 	function _admin_page(){
 		wp_enqueue_style(BMSC_OPT_PREFIX.'admin');
-		#wp_enqueue_script(BMSC_OPT_PREFIX.'admin');
+		wp_enqueue_script(BMSC_OPT_PREFIX.'admin');
 		
 		$current_tab = (isset($_GET['tab']) && $_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'copier';
 		
@@ -271,24 +276,38 @@ class BM_Site_Copier {
 	 */
 	function copier(){
 		if(isset($_POST) && count($_POST) > 0){
-			foreach($_POST as $k => $v){
-				if(substr($k, 0, strlen(BMSC_OPT_PREFIX)) == BMSC_OPT_PREFIX){
-					$k = str_replace(BMSC_OPT_PREFIX, '', $k);
-					if(is_array($v)){
-						$this->vars[$k] = $v;
-					} else {
-						$this->vars[$k] = sanitize_text_field($v);
-					}
-				}
-			}
+			$this->post_vars();
 			
-			do_action('bmsc_copy_site', $this);
+			$test = $this->test_connections();
+			if($test['success']){
+				do_action('bmsc_copy_site', $this);
+			} else {
+				$this->error = $test['report'];
+			}
 			
 			add_action('admin_notices', array($this, '_site_copied'));
 			
 		}
 		
 		return array();
+	}
+	
+	/**
+	 * BM_Site_Copier::post_vars()
+	 * 
+	 * @return void
+	 */
+	function post_vars(){
+		foreach($_POST as $k => $v){
+			if(substr($k, 0, strlen(BMSC_OPT_PREFIX)) == BMSC_OPT_PREFIX){
+				$k = str_replace(BMSC_OPT_PREFIX, '', $k);
+				if(is_array($v)){
+					$this->vars[$k] = $v;
+				} else {
+					$this->vars[$k] = sanitize_text_field($v);
+				}
+			}
+		}
 	}
 	
 	/**
@@ -464,6 +483,10 @@ class BM_Site_Copier {
 							$line = '$table_prefix  = \''.$this->vars['db_prefix'].'\';' . PHP_EOL;
 						} elseif(strpos($line, 'ini_set(\'display_errors\'') !== false){
 							$line = 'ini_set(\'display_errors\',\'0\');' . PHP_EOL;
+						} elseif(strpos($line, 'DOMAIN_CURRENT_SITE') !== false){
+							$domain = trim($this->vars['new_url'], 'https://');
+							$domain = trim($this->vars['new_url'], 'http://');
+							$line = 'define(\'DOMAIN_CURRENT_SITE\', \''.$domain.'\');' . PHP_EOL;
 						} else {
 							$auth_keys = array(
 								'AUTH_KEY' => 3,			'SECURE_AUTH_KEY' => 1,
@@ -520,8 +543,14 @@ class BM_Site_Copier {
 		$host = $this->vars['db_remote_host'];
 		
 		$conn = "mysql:host=$host;dbname=".$this->vars['db_name'];
-		$db = new PDO($conn, $this->vars['db_user'], $this->vars['db_pass']);
+		echo $conn; exit();
+		try {
+			$db = new PDO($conn, $this->vars['db_user'], $this->vars['db_pass']);
+		} catch (PDOException $e){
+			$this->error = $e->getMessage();
+		}
 		
+		$db->query('SET GLOBAL max_allowed_packet = 524288000;'); // (500 * 1024 * 1024)
 		if($db->query(file_get_contents($sql_file))){
 			unlink($sql_file);
 			return true;
@@ -540,7 +569,7 @@ class BM_Site_Copier {
 			'search_for' => $this->vars['site_url'],
 			'replace_with' => $this->vars['new_url'],
 			
-			'db_host' => $this->vars['db_host'],
+			'db_host' => $this->vars['db_remote_host'],
 			'db_name' => $this->vars['db_name'],
 			'db_user' => $this->vars['db_user'],
 			'db_pass' => $this->vars['db_pass']
@@ -550,5 +579,70 @@ class BM_Site_Copier {
 		$srdb->search_replace();
 		
 		#$srdb->get_report();
+	}
+	
+	
+	function test_connections(){
+		$this->post_vars();
+		
+		$response = array(
+			'ftp' => false,
+			'ftp_error' => '',
+			'database' => false,
+			'database_error' => '',
+			'success' => false
+		);
+		
+		/* test database connection */
+		if($this->vars['db_remote_host'] && $this->vars['db_user'] && $this->vars['db_pass'] && $this->vars['db_name']){
+			$host = $this->vars['db_remote_host'];
+			$conn = "mysql:host=$host;dbname=".$this->vars['db_name'];
+			try {
+				$db = new PDO($conn, $this->vars['db_user'], $this->vars['db_pass']);
+			} catch (PDOException $e){
+				$response['database_error'] = $e->getMessage();
+			}
+			if(!$response['database_error']){
+				$response['database'] = true;
+			}
+		} else {
+			$response['database_error'] = 'Missing database connection settings.';
+		}
+		
+		
+		/* test FTP connection */
+		if($this->vars['ftp_host'] && $this->vars['ftp_user'] && $this->vars['ftp_pass']){
+			$conn = ftp_connect($this->vars['ftp_host']);
+			$login = ftp_login($conn, $this->vars['ftp_user'], $this->vars['ftp_pass']);
+			if($login){
+				$response['ftp'] = true;
+			}
+		} else {
+			$response['ftp_error'] = 'Missing FTP connection settings.';
+		}
+		
+		
+		if($response['ftp'] && $response['database']){
+			$response['success'] = true;
+		}
+		
+		$report = '<div class="bmsc-connection-report">';
+			$report .= '<div class="bmsc-ftp-connection">FTP Connection: ';
+				$report .= '<span class="'.($response['ftp'] ? 'success' : 'error').'">'.($response['ftp'] ? 'Success!' : 'Failed.').'</span>'.($response['ftp_error'] ? ' - '.$response['ftp_error'] : '');
+			$report .= '</div>';
+			
+			$report .= '<div class="bmsc-database-connection">Database Connection: ';
+				$report .= '<span class="'.($response['database'] ? 'success' : 'error').'">'.($response['database'] ? 'Success!' : 'Failed.').'</span>'.($response['database_error'] ? ' - '.$response['database_error'] : '');
+			$report .= '</div>';
+		$report .= '</div>';
+		
+		$response['report'] = utf8_encode($report);
+		
+		if(isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
+			echo json_encode($response);
+			exit();
+		}
+		
+		return $response;
 	}
 }

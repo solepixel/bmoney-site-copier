@@ -3,12 +3,12 @@
  * Plugin Name: BMoney Site Copier
  * Plugin URI: https://github.com/solepixel/bmoney-site-copier/
  * Description: Copy a site from one domain to another.
- * Version: 1.1
+ * Version: 1.2
  * Author: Brian DiChiara
  * Author URI: http://www.briandichiara.com
  */
 
-define('BMSC_VERSION', '1.1');
+define('BMSC_VERSION', '1.2');
 define('BMSC_PI_NAME', 'Site Copier');
 define('BMSC_PI_DESCRIPTION', 'Copy a site from one domain to another.');
 define('BMSC_OPT_PREFIX', 'bmcm_');

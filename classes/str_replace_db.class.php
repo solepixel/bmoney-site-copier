@@ -147,8 +147,12 @@ class Str_replace_db {
 	}
 	
 	function _setup_db(){
-		$conn = $this->params['db_scheme'].':host='.$this->parmas['db_host'].';dbname='.$this->params['db_name'];
-		$this->db = new PDO($conn, $this->params['db_user'], $this->params['db_pass']);
+		$conn = $this->params['db_scheme'].':host='.$this->params['db_host'].';dbname='.$this->params['db_name'];
+		try {
+			$this->db = new PDO($conn, $this->params['db_user'], $this->params['db_pass']);
+		} catch(PDOException $e){
+			$this->error($e->getMessage());
+		}
 	}
 	
 	function db_query($sql){

@@ -38,6 +38,7 @@
 	</fieldset>
 	
 	<div class="buttons">
-		<?php submit_button(__('Copy!', 'bmsc')); ?>
+		<button class="button" id="test-connections">Test Connections</button> &nbsp; 
+		<?php submit_button(__('Copy!', 'bmsc'), 'primary', '', false); ?>
 	</div>
 </form>
