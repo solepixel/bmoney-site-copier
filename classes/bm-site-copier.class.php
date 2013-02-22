@@ -543,7 +543,7 @@ class BM_Site_Copier {
 		$host = $this->vars['db_remote_host'];
 		
 		$conn = "mysql:host=$host;dbname=".$this->vars['db_name'];
-		echo $conn; exit();
+		
 		try {
 			$db = new PDO($conn, $this->vars['db_user'], $this->vars['db_pass']);
 		} catch (PDOException $e){
