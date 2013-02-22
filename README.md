@@ -1,7 +1,7 @@
 BMoney Site Copier
 =================
 
-~Current Version:1.2~
+~Current Version:1.3~
 
 DOCUMENTATION COMING SOON...
 
@@ -15,6 +15,8 @@ Filters
 
 Changelog
 ===========
+### 1.3
+* removed line of debugging code.
 
 ### 1.2
 * Added Connection Tester
