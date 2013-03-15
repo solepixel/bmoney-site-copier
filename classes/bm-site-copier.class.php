@@ -522,7 +522,7 @@ class BM_Site_Copier {
 		$random = '';
 		for ($i = 0; $i < $length; $i++) {
 			$char = chr(mt_rand(33, 126));
-			if($char != '\''){ // single quotes break stuff.
+			if(!in_array($char, array('\'','\\'))){ // single quotes and slashes break stuff.
 				$random .= $char;
 			} else {
 				$i--;
